@@ -1,0 +1,15 @@
+# Render 배포 설정 — https://render.com
+# 저장소를 연결하면 이 파일로 자동 구성됩니다 (Blueprint).
+services:
+  - type: web
+    name: barrierfree-seoul-mcp
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: DATA_GO_KR_ELEVATOR_KEY
+        sync: false   # 대시보드에서 직접 입력 (커밋 금지)
+      - key: DATA_GO_KR_BUS_KEY
+        sync: false
+    healthCheckPath: /health
