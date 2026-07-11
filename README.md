@@ -1,4 +1,4 @@
-# BarrierFreeSeoul(무장애서울) — 교통약자 대중교통 MCP
+# EasyWaySeoul(쉬운길 서울) — 교통약자 대중교통 MCP
 
 카카오 PlayMCP 개발 공모전(MCP Player 10, 2회차) 출품작.
 서울 지하철/버스를 **교통약자(휠체어·시각장애·고령자·유아동반)** 관점에서

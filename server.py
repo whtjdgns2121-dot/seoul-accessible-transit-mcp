@@ -1,5 +1,5 @@
 """
-BarrierFreeSeoul(무장애서울) — 교통약자 전용 대중교통 MCP 서버
+EasyWaySeoul(쉬운길 서울) — 교통약자 전용 대중교통 MCP 서버
 
 서울 지하철/버스를 교통약자(휠체어·시각장애·고령자·유아동반) 관점에서
 '실제로 이용 가능한지'까지 판단해 안내하는 MCP 서버.
@@ -36,7 +36,7 @@ load_dotenv()  # .env 로드 (배포 환경에선 주입된 env가 우선)
 # 설정
 # ---------------------------------------------------------------------------
 
-SERVICE_NAME = "BarrierFreeSeoul(무장애서울)"
+SERVICE_NAME = "EasyWaySeoul(쉬운길 서울)"
 
 ELEVATOR_KEY = os.getenv("DATA_GO_KR_ELEVATOR_KEY", "").strip()
 BUS_KEY = os.getenv("DATA_GO_KR_BUS_KEY", "").strip()
@@ -479,7 +479,7 @@ def _note(is_live: bool) -> str:
 async def check_station_facilities(station: str) -> str:
     """Checks the REAL-TIME operating status of elevators/wheelchair lifts AND the presence of
     nursing rooms (with diaper-changing tables) at a Seoul subway station, using the
-    BarrierFreeSeoul(무장애서울) transit service. Use this to warn a mobility-impaired user when
+    EasyWaySeoul(쉬운길 서울) transit service. Use this to warn a mobility-impaired user when
     an elevator is under inspection/broken and to suggest a working exit, or to find a nursing
     room for a parent with an infant. Input: Korean station name without the '역' suffix
     (e.g. '신촌', '강남')."""
@@ -527,7 +527,7 @@ async def check_station_facilities(station: str) -> str:
 )
 async def get_low_floor_bus_arrival(stop_name: str) -> str:
     """Returns REAL-TIME arrival info for LOW-FLOOR (wheelchair-accessible) buses only at a
-    Seoul bus stop, using the BarrierFreeSeoul(무장애서울) transit service. Filters out regular
+    Seoul bus stop, using the EasyWaySeoul(쉬운길 서울) transit service. Filters out regular
     high-floor buses so a wheelchair user only sees boardable options. Input: Korean bus stop
     name (e.g. '서울역환승센터')."""
     buses, is_live = await fetch_low_floor_bus(stop_name)
@@ -563,7 +563,7 @@ MAX_ROUTE_STATIONS = 10  # 응답속도(p99 3s) 보호
 )
 async def verify_route_accessibility(stations: list[str], mobility_type: str = "wheelchair") -> str:
     """Verifies whether a planned Seoul subway route is ACTUALLY passable for a
-    mobility-impaired user, using the BarrierFreeSeoul(무장애서울) transit service.
+    mobility-impaired user, using the EasyWaySeoul(쉬운길 서울) transit service.
     Pass the ordered station list of a route (origin, transfers, destination); it checks
     real-time elevator/lift status at every station in parallel, cross-checks any ACTIVE
     train delay/incident/schedule-adjustment alerts on the lines the route uses, reports
@@ -661,7 +661,7 @@ async def verify_route_accessibility(stations: list[str], mobility_type: str = "
 async def find_call_taxi(region: str = "서울") -> str:
     """Provides contact and usage guidance for Seoul's special transport service (disabled
     call taxi) as a fallback when routes/low-floor buses are unavailable, using the
-    BarrierFreeSeoul(무장애서울) transit service. Input: region name (default '서울')."""
+    EasyWaySeoul(쉬운길 서울) transit service. Input: region name (default '서울')."""
     # 참고: 장애등급제는 2019년 폐지 → '장애의 정도가 심한 장애인' 기준으로 표기
     return (
         f"### {region} 장애인 콜택시(특별교통수단)\n"
