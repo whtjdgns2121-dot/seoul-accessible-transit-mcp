@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 load_dotenv()  # .env 로드 (배포 환경에선 주입된 env가 우선)
@@ -452,7 +453,13 @@ async def fetch_low_floor_bus(stop_name: str) -> tuple[list[dict], bool]:
 # MCP 서버 + 툴 정의
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP(SERVICE_NAME, stateless_http=True)
+# DNS rebinding 보호는 localhost 개발 서버용 — 공개 읽기전용 원격 서버에선 비활성화
+# (Render/Cloudflare 뒤에서 Host가 도메인으로 들어와 기본 설정이 421을 반환하는 문제 해결)
+mcp = FastMCP(
+    SERVICE_NAME,
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 def _note(is_live: bool) -> str:
