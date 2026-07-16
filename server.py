@@ -171,15 +171,28 @@ _SAMPLE_NURSING = {
 _SAMPLE_ALERTS: list[dict] = []  # 평시엔 활성 알림이 없는 경우가 많아 빈 리스트가 현실적인 샘플
 
 
+def _station_variants(station: str) -> tuple[str, set[str]]:
+    """역명 정규화 — 검색어(base)와 허용 정식명칭 집합을 반환.
+
+    '서울역'처럼 정식 명칭 자체에 '역'이 포함된 역과, '신촌'처럼 접미사 없는 역을
+    모두 처리한다. API는 포함검색이므로 base로 조회한 뒤 정확 매칭으로 걸러낸다
+    (예: '서울' 검색 시 '서울대입구'가 섞이는 것 방지).
+    """
+    name = station.strip().replace(" ", "")
+    base = name.removesuffix("역") or name
+    return base, {base, base + "역"}
+
+
 async def fetch_station_facilities(station: str) -> tuple[list[dict], bool]:
     """(설비목록, is_live) 반환. is_live=False면 샘플."""
-    ckey = f"elev:{station}"
+    base, allowed = _station_variants(station)
+    ckey = f"elev:{base}"
     cached = _cache_get(ckey)
     if cached is not None:
         return cached
 
     if not ELEVATOR_KEY:
-        result = (_SAMPLE_ELEVATORS.get(station, []), False)
+        result = (_SAMPLE_ELEVATORS.get(base, []), False)
         _cache_set(ckey, result)
         return result
 
@@ -189,16 +202,16 @@ async def fetch_station_facilities(station: str) -> tuple[list[dict], bool]:
             {
                 "serviceKey": ELEVATOR_KEY,
                 "dataType": "JSON",
-                "stnNm": station,  # 포함검색
+                "stnNm": base,  # 포함검색 → allowed로 정확 필터
                 "numOfRows": 50,
                 "pageNo": 1,
             },
         )
-        facilities = _parse_elevator_response(data)
+        facilities = _parse_elevator_response(data, allowed)
         result = (facilities, True)
     except Exception:
         # 실패 시 샘플로 안전 폴백
-        result = (_SAMPLE_ELEVATORS.get(station, []), False)
+        result = (_SAMPLE_ELEVATORS.get(base, []), False)
     _cache_set(ckey, result)
     return result
 
@@ -207,12 +220,13 @@ async def fetch_station_facilities(station: str) -> tuple[list[dict], bool]:
 _OPRTNG_SITU_LABEL = {"M": "정상", "S": "운행중지"}
 
 
-def _parse_elevator_response(data: Any) -> list[dict]:
+def _parse_elevator_response(data: Any, allowed: set[str] | None = None) -> list[dict]:
     """getFcElvtr 응답 파싱 — 실측 스키마 (2026-07-11 data.go.kr 15143841 라이브 검증).
 
     body.items.item[]: fcltNm(시설명), lineNm(호선), stnNm(역명),
     vcntEntrcNo(근접 출입구), dtlPstn(상세위치), bgngFlr/endFlr(운행구간),
     oprtngSitu(가동현황 코드: M=가동중, S=정지) ← 핵심 상태값
+    allowed: 정식 역명 정확 매칭 집합 (포함검색 오염 방지, None이면 전체 허용)
     """
     if not isinstance(data, dict):
         return []
@@ -227,6 +241,8 @@ def _parse_elevator_response(data: Any) -> list[dict]:
 
     out = []
     for it in item or []:
+        if allowed is not None and (it.get("stnNm") or "").strip() not in allowed:
+            continue
         # vcntEntrcNo 형식이 역마다 다름: "4"(순수 숫자) / "2번출구"(완성된 텍스트) / "내부" 등.
         # dtlPstn(상세위치, 예: "신설동 방면4-3")은 있을 때 정보량이 크므로 함께 조합.
         entrance = (it.get("vcntEntrcNo") or "").strip()
@@ -264,33 +280,35 @@ def _parse_elevator_response(data: Any) -> list[dict]:
 
 async def fetch_nursing_facilities(station: str) -> tuple[list[dict], bool]:
     """(수유실/기저귀교환대 목록, is_live) 반환. is_live=False면 샘플."""
-    ckey = f"nurs:{station}"
+    base, allowed = _station_variants(station)
+    ckey = f"nurs:{base}"
     cached = _cache_get(ckey)
     if cached is not None:
         return cached
 
     if not ELEVATOR_KEY:  # 같은 계정/키를 편의시설위치정보 전반에 재사용
-        result = (_SAMPLE_NURSING.get(station, []), False)
+        result = (_SAMPLE_NURSING.get(base, []), False)
         _cache_set(ckey, result)
         return result
 
     try:
         data = await _get_json(
             NURSING_API_URL,
-            {"serviceKey": ELEVATOR_KEY, "dataType": "JSON", "stnNm": station, "numOfRows": 20, "pageNo": 1},
+            {"serviceKey": ELEVATOR_KEY, "dataType": "JSON", "stnNm": base, "numOfRows": 20, "pageNo": 1},
         )
-        result = (_parse_nursing_response(data), True)
+        result = (_parse_nursing_response(data, allowed), True)
     except Exception:
-        result = (_SAMPLE_NURSING.get(station, []), False)
+        result = (_SAMPLE_NURSING.get(base, []), False)
     _cache_set(ckey, result)
     return result
 
 
-def _parse_nursing_response(data: Any) -> list[dict]:
+def _parse_nursing_response(data: Any, allowed: set[str] | None = None) -> list[dict]:
     """getFcNrsrm 응답 파싱 — 실측 스키마 (2026-07-11 라이브 검증, 신촌역 가족수유실).
 
     dprSwchbrdCnt(기저귀교환대 개수), infntBedEn/infntBedCnt(유아용 침대),
     utztnHr(이용시간), dtlPstn/exitNo(위치), fcltSeNm(수유실 유형)
+    allowed: 정식 역명 정확 매칭 집합 (포함검색 오염 방지, None이면 전체 허용)
     """
     if not isinstance(data, dict):
         return []
@@ -305,6 +323,8 @@ def _parse_nursing_response(data: Any) -> list[dict]:
 
     out = []
     for it in item or []:
+        if allowed is not None and (it.get("stnNm") or "").strip() not in allowed:
+            continue
         exit_no = str(it.get("exitNo") or "").strip()
         exit_label = f"{exit_no}번 출구 인근" if exit_no.isdigit() else (it.get("dtlPstn") or "위치미상")
         try:
@@ -481,15 +501,18 @@ async def check_station_facilities(station: str) -> str:
     nursing rooms (with diaper-changing tables) at a Seoul subway station, using the
     EasyWaySeoul(쉬운길 서울) transit service. Use this to warn a mobility-impaired user when
     an elevator is under inspection/broken and to suggest a working exit, or to find a nursing
-    room for a parent with an infant. Input: Korean station name without the '역' suffix
-    (e.g. '신촌', '강남')."""
+    room for a parent with an infant. Input: Korean station name, with or without the '역'
+    suffix (e.g. '신촌', '서울역')."""
     (facilities, elev_live), (nursing, nurs_live) = await asyncio.gather(
         fetch_station_facilities(station), fetch_nursing_facilities(station)
     )
+    display = station.strip().replace(" ", "")
+    if not display.endswith("역"):
+        display += "역"
     if not facilities and not nursing:
-        return f"**{station}역** 편의시설 정보를 찾지 못했어요. 역명을 확인해 주세요 (예: '신촌')."
+        return f"**{display}** 편의시설 정보를 찾지 못했어요. 역명을 확인해 주세요 (예: '신촌', '서울역')."
 
-    lines = [f"### {station}역 교통약자 편의시설"]
+    lines = [f"### {display} 교통약자 편의시설"]
     broken = [f for f in facilities if _status_class(f.get("status")) == "bad"]
     for f in facilities:
         cls = _status_class(f.get("status"))

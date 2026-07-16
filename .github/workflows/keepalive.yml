@@ -1,0 +1,15 @@
+# Render 무료 티어는 15분 유휴 시 슬립 → 첫 요청이 50초+ 걸려
+# PlayMCP 응답시간 요건(p99 3초)을 초과한다. 10분마다 /health를 핑해 항상 깨워둔다.
+name: keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: curl -sS --max-time 60 https://barrierfree-seoul-mcp.onrender.com/health
