@@ -387,6 +387,7 @@ def _parse_alert_response(data: Any) -> list[dict]:
 
     now = datetime.now(timezone.utc).astimezone(KST).replace(tzinfo=None)
     out = []
+    seen: set[tuple[str, datetime]] = set()  # 동일 알림 중복 제거 (제목+시작일시)
     for it in item or []:
         begin = _parse_kst_dt(it.get("xcseSitnBgngDt"))
         if begin is None or begin > now:
@@ -394,10 +395,19 @@ def _parse_alert_response(data: Any) -> list[dict]:
         end = _parse_kst_dt(it.get("xcseSitnEndDt"))
         if end is not None and end < now:
             continue  # 이미 종료
+        # 종료일시가 없는 알림은 시작 후 14일까지만 활성으로 간주
+        # (수개월 지난 공지가 무기한 노출되는 것 방지 — '별도 안내 시까지'형 조정은
+        #  대체로 이 기간 내 재공지되므로 실용적 절충)
+        if end is None and begin < now - timedelta(days=14):
+            continue
+        title = (it.get("noftTtl") or "").strip()
+        if (title, begin) in seen:
+            continue
+        seen.add((title, begin))
         lines_raw = (it.get("lineNmLst") or "").strip()
         out.append(
             {
-                "title": (it.get("noftTtl") or "").strip(),
+                "title": title,
                 "content": (it.get("noftCn") or "").strip().replace("\r\n", " ").replace("\n", " ")[:120],
                 "lines": {x.strip() for x in lines_raw.split(",") if x.strip()},
                 "since": begin,
@@ -596,7 +606,12 @@ async def verify_route_accessibility(stations: list[str], mobility_type: str = "
     the '역' suffix (e.g. ['화곡', '신촌'])."""
     if not stations:
         return "역 목록이 비어 있어요. 경로의 역 이름을 순서대로 전달해 주세요 (예: ['화곡', '신촌'])."
-    stations = [s.strip().removesuffix("역") for s in stations][:MAX_ROUTE_STATIONS]
+    # 정규화 + 순서 보존 중복 제거 (LLM이 같은 역을 두 번 넣는 경우 방어)
+    seen_st: set[str] = set()
+    stations = [
+        s for s in (x.strip().removesuffix("역") for x in stations)
+        if s and not (s in seen_st or seen_st.add(s))
+    ][:MAX_ROUTE_STATIONS]
 
     # 전 역 엘리베이터 + 노선 운행알림을 동시에 병렬 조회 (캐시 적용)
     facility_results, (alerts, alerts_live) = await asyncio.gather(
@@ -669,6 +684,48 @@ async def verify_route_accessibility(stations: list[str], mobility_type: str = "
         lines.append(f"- **대안 3**: 장애인 콜택시 — `find_call_taxi` 참고")
 
     return "\n".join(lines) + _note(not any_sample)
+
+
+@mcp.tool(
+    structured_output=False,
+    annotations=ToolAnnotations(
+        title="지하철 실시간 운행 알림(지연·사고·무정차) 조회",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
+)
+async def get_service_alerts(line: str = "") -> str:
+    """Returns ACTIVE Seoul subway service alerts happening RIGHT NOW — train delays,
+    incidents, skipped stops (무정차), and schedule adjustments — using the
+    EasyWaySeoul(쉬운길 서울) transit service. Optionally filter by line name
+    (e.g. '2호선' or '2'). Use this for questions like 'is line 2 delayed now?' or
+    'any subway disruptions today?'. Data refreshes every minute from Seoul Metro."""
+    alerts, is_live = await fetch_active_alerts()
+
+    # 호선 입력 정규화: '2' → '2호선'
+    line_q = line.strip().replace(" ", "")
+    if line_q and not line_q.endswith("호선") and not line_q.endswith("선"):
+        line_q += "호선"
+
+    if line_q:
+        matched = [a for a in alerts if line_q in a["lines"]]
+        header = f"### {line_q} 실시간 운행 알림"
+    else:
+        matched = alerts
+        header = "### 서울지하철 실시간 운행 알림"
+
+    if not matched:
+        scope = f"{line_q}에" if line_q else "서울지하철에"
+        return f"🟢 현재 {scope} 접수된 지연·사고·무정차 등 이례상황이 없습니다.{_note(is_live)}"
+
+    lines_out = [header]
+    for a in matched[:5]:
+        lines_txt = ",".join(sorted(a["lines"])) or "노선 미상"
+        since = a["since"].strftime("%m/%d %H:%M")
+        lines_out.append(f"- 🚨 **{a['title']}** ({lines_txt}, {since}부터)\n  {a['content']}")
+    return "\n".join(lines_out) + _note(is_live)
 
 
 @mcp.tool(
